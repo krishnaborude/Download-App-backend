@@ -28,13 +28,27 @@ def cleanup_expired_files():
     
     for token in expired_tokens:
         try:
-            # Get file path before removing from storage
-            file_path = file_storage[token]["file_path"]
-            # Remove from storage first
+            file_data = file_storage[token]
+            # Clean up all files associated with this token
+            if "files" in file_data:
+                for file_info in file_data["files"]:
+                    try:
+                        file_path = file_info["file_path"]
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                    except Exception as e:
+                        print(f"Error removing file: {str(e)}")
+                        
+            # Check for potential zip file
+            zip_path = os.path.join(UPLOAD_DIR, f"download_{token}.zip")
+            if os.path.exists(zip_path):
+                try:
+                    os.remove(zip_path)
+                except Exception as e:
+                    print(f"Error removing zip file: {str(e)}")
+                    
+            # Remove from storage
             del file_storage[token]
-            # Then try to remove the file if it exists
-            if os.path.exists(file_path):
-                os.remove(file_path)
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
 
@@ -91,10 +105,49 @@ def get_server_url(request: Request) -> str:
     """
     Get the server's network accessible URL
     """
-    hostname = socket.gethostname()
-    local_ip = socket.gethostbyname(hostname)
-    port = request.url.port
-    return f"http://{local_ip}:{port}"
+    def get_local_ips():
+        ips = []
+        try:
+            # Try getting IP by connecting to public DNS
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ips.append(s.getsockname()[0])
+            s.close()
+        except Exception:
+            pass
+
+        try:
+            # Get all network interface IPs
+            hostname = socket.gethostname()
+            for ip in socket.gethostbyname_ex(hostname)[2]:
+                if not ip.startswith("127."):  # Skip localhost
+                    ips.append(ip)
+        except Exception:
+            pass
+
+        if not ips:  # If no IPs found, fallback to basic method
+            try:
+                hostname = socket.gethostname()
+                ips.append(socket.gethostbyname(hostname))
+            except Exception:
+                ips.append("127.0.0.1")  # Last resort fallback
+
+        return list(set(ips))  # Remove duplicates
+
+    local_ips = get_local_ips()
+    port = request.url.port or 8000  # Fallback to 8000 if port is None
+    
+    # Print all available IPs for debugging
+    print("\nAvailable network URLs:")
+    for ip in local_ips:
+        print(f"http://{ip}:{port}")
+    
+    # Use the first non-localhost IP, or localhost if that's all we have
+    for ip in local_ips:
+        if not ip.startswith("127."):
+            return f"http://{ip}:{port}"
+    
+    return f"http://{local_ips[0]}:{port}"
 
 # Configure upload directory
 UPLOAD_DIR = "uploads"
@@ -115,8 +168,10 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
         token = generate_download_token()
         expiry_time = datetime.now() + timedelta(minutes=10)  # Token expires in 10 minutes
         file_storage[token] = {
-            "filename": file.filename,
-            "file_path": file_path,
+            "files": [{
+                "filename": file.filename,
+                "file_path": file_path
+            }],
             "expiry_time": expiry_time,
             "used": False
         }
@@ -126,6 +181,11 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
         download_link = f"{base_url}/api/download/{token}"
         qr_code_link = f"{base_url}/api/qr-code/{token}"
         
+        # For local testing, also provide localhost URLs
+        localhost_base = f"http://127.0.0.1:{request.url.port}"
+        localhost_download = f"{localhost_base}/api/download/{token}"
+        localhost_qr = f"{localhost_base}/api/qr-code/{token}"
+        
         # Clean up expired files
         # cleanup_expired_files()
         
@@ -134,8 +194,10 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
             "filename": file.filename,
             "status": "success",
             "download_link": download_link,
+            "localhost_download": localhost_download,
             "qr_code_link": qr_code_link,
-            "message": "link expires in 10 minutes"
+            "localhost_qr": localhost_qr,
+            "message": "link expires in 10 minutes. Use localhost links for local testing."
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -208,15 +270,20 @@ async def download_file(token: str, request: Request):
     """
     Download files using a one-time download token. For multiple files, creates a zip archive.
     """
+    print(f"\nDownload request received for token: {token}")
+    print(f"Available tokens: {list(file_storage.keys())}")
     try:
         # Clean up expired files
         cleanup_expired_files()
+        print(f"After cleanup, available tokens: {list(file_storage.keys())}")
 
         # Check if token exists and is valid
         if token not in file_storage:
+            print(f"Token {token} not found in storage")
             raise HTTPException(status_code=404, detail="Files not found or link has expired")
 
         file_data = file_storage[token]
+        print(f"File data found: {file_data}")
 
         # Check if the token has been used
         if file_data["used"]:
