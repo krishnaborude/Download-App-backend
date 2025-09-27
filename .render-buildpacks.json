@@ -1,0 +1,8 @@
+{
+    "packages": [
+        "python3-dev",
+        "build-essential",
+        "libjpeg-dev",
+        "zlib1g-dev"
+    ]
+}
