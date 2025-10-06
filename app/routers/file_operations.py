@@ -105,49 +105,47 @@ def get_server_url(request: Request) -> str:
     """
     Get the server's network accessible URL
     """
-    def get_local_ips():
-        ips = []
+    # Check if running on Render (they set RENDER environment variable)
+    if os.getenv("RENDER"):
+        # Get the Render external URL from environment or construct it
+        render_external_url = os.getenv("RENDER_EXTERNAL_URL")
+        if render_external_url:
+            # Remove trailing slash if present
+            return render_external_url.rstrip('/')
+        
+        # Fallback to constructing URL from hostname
+        render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+        if render_hostname:
+            scheme = "https"  # Render uses HTTPS by default
+            return f"{scheme}://{render_hostname}"
+    
+    # Local development: Get the local network IP
+    def get_local_ip():
         try:
             # Try getting IP by connecting to public DNS
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
-            ips.append(s.getsockname()[0])
+            ip = s.getsockname()[0]
             s.close()
+            return ip
         except Exception:
-            pass
-
-        try:
-            # Get all network interface IPs
+            # Fallback to basic method if the above fails
             hostname = socket.gethostname()
-            for ip in socket.gethostbyname_ex(hostname)[2]:
-                if not ip.startswith("127."):  # Skip localhost
-                    ips.append(ip)
-        except Exception:
-            pass
+            return socket.gethostbyname(hostname)
 
-        if not ips:  # If no IPs found, fallback to basic method
-            try:
-                hostname = socket.gethostname()
-                ips.append(socket.gethostbyname(hostname))
-            except Exception:
-                ips.append("127.0.0.1")  # Last resort fallback
+    # Use request's scheme and host if available
+    if request.headers.get("x-forwarded-proto"):
+        scheme = request.headers.get("x-forwarded-proto")
+        host = request.headers.get("x-forwarded-host", request.headers.get("host"))
+        if host:
+            return f"{scheme}://{host}"
 
-        return list(set(ips))  # Remove duplicates
-
-    local_ips = get_local_ips()
-    port = request.url.port or 8000  # Fallback to 8000 if port is None
+    # Local development
+    local_ip = get_local_ip()
+    port = request.url.port or 8000
     
-    # Print all available IPs for debugging
-    print("\nAvailable network URLs:")
-    for ip in local_ips:
-        print(f"http://{ip}:{port}")
-    
-    # Use the first non-localhost IP, or localhost if that's all we have
-    for ip in local_ips:
-        if not ip.startswith("127."):
-            return f"http://{ip}:{port}"
-    
-    return f"http://{local_ips[0]}:{port}"
+    print(f"\nServer URL: http://{local_ip}:{port}")
+    return f"http://{local_ip}:{port}"
 
 # Configure upload directory
 UPLOAD_DIR = "uploads"
