@@ -40,8 +40,8 @@ GET /api/qr-code/{token}
 ### Installation
 1. Clone the repository
 ```bash
-git clone Download-App-backend
-cd Download-App-backend
+git clone https://github.com/krishnaborude/Share-App-backend.git
+cd Share-App-backend
 ```
 
 2. Create a virtual environment
