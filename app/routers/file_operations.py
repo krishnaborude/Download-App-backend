@@ -368,25 +368,19 @@ async def get_qr_code(token: str, request: Request):
             del file_storage[token]
             raise HTTPException(status_code=410, detail="This download link has already been used")
         
-        # Check if the file exists
-        if not os.path.exists(file_data["file_path"]):
-            del file_storage[token]
-            raise HTTPException(status_code=404, detail="File not found on server")
+        # Check if the files exist
+        for file_info in file_data["files"]:
+            if not os.path.exists(file_info["file_path"]):
+                del file_storage[token]
+                raise HTTPException(status_code=404, detail="One or more files not found on server")
         
         # Generate QR code for the download URL
         base_url = get_server_url(request)
         download_url = f"{base_url}/api/download/{token}"
         qr_code = generate_qr_code(download_url)
         
-        # Mark the token as used and prepare for cleanup
-        file_data["used"] = True
-        file_path = file_data["file_path"]
-        filename = file_data["filename"]
-        
-        # Create response first
-        response = Response(content=qr_code, media_type="image/png")
-        
-      
-        return response
+        # Return QR code without marking the token as used
+        # This allows the QR code to be scanned and the file to be downloaded later
+        return Response(content=qr_code, media_type="image/png")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
